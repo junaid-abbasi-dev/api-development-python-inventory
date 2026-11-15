@@ -60,6 +60,18 @@ def create_products():
     }
     inventory.append(new_item)
     return jsonify(new_item), 201
-    
+
+@app.route("/inventory/<int:id>", methods=["PATCH"])
+def update_products(id):
+    data = request.get_json()
+    for product in inventory:
+        if product["id"] == id:
+            if "price" in data:
+                product["price"] = data["price"]
+            if "quantity" in data:
+                product["quantity"] = data["quantity"]
+            return jsonify(product)
+    return jsonify({"message": "Product not found"}), 404
+
 if __name__ == "__main__":
     app.run(port=5555, debug=True)
