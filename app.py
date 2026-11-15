@@ -1,4 +1,5 @@
 from flask import Flask, jsonify, request
+import requests
 
 app = Flask(__name__)
 
@@ -80,6 +81,50 @@ def delete_product(id):
             inventory.remove(product)
             return "", 204
     return jsonify({"message": "Product not found"}), 404
+
+def fetch_product_by_barcode(barcode):
+    url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
+    headers = {"User-Agent": "FlatironInventoryLab/1.0 (student project)"}
+    response = requests.get(url, headers=headers, timeout=10)
+    data = response.json()
+    if data.get("status") != 1:
+        return None
+    product = data["product"]
+    return {
+        "product_name": product.get("product_name"),
+        "brands": product.get("brands"),
+        "ingredients_text": product.get("ingredients_text"),
+        "barcode": barcode
+    }
+
+@app.route("/lookup", methods=["GET"])
+def lookup_product():
+    barcode = request.args.get("barcode")
+    if not barcode:
+        return jsonify({"message": "Provide a barcode"}), 400
+    product = fetch_product_by_barcode(barcode)
+    if product is None:
+        return jsonify({"message": "Product not found"}), 404
+    return jsonify(product)
+
+@app.route("/inventory/from-barcode", methods=["POST"])
+def add_from_barcode():
+    data = request.get_json()
+    product = fetch_product_by_barcode(data.get("barcode"))
+    if product is None:
+        return jsonify({"message": "Product not found"}), 404
+    new_id = max(item["id"] for item in inventory) + 1
+    new_item = {
+        "id": new_id,
+        "product_name": product["product_name"],
+        "brands": product["brands"],
+        "ingredients_text": product["ingredients_text"],
+        "barcode": product["barcode"],
+        "price": data.get("price", 0),
+        "quantity": data.get("quantity", 0)
+    }
+    inventory.append(new_item)
+    return jsonify(new_item), 201
 
 if __name__ == "__main__":
     app.run(port=5555, debug=True)
