@@ -49,7 +49,7 @@ def get_product_by_id(id):
 @app.route("/inventory", methods=["POST"])
 def create_products():
     data = request.get_json()
-    new_id = max(item["id"] for item in inventory) + 1
+    new_id = max((item["id"] for item in inventory), default=0) + 1
     new_item = {
         "id": new_id,
         "product_name": data["product_name"],
@@ -82,14 +82,7 @@ def delete_product(id):
             return "", 204
     return jsonify({"message": "Product not found"}), 404
 
-def fetch_product_by_barcode(barcode):
-    url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
-    headers = {"User-Agent": "FlatironInventoryLab/1.0 (student project)"}
-    response = requests.get(url, headers=headers, timeout=10)
-    data = response.json()
-    if data.get("status") != 1:
-        return None
-    product = data["product"]
+def _product_fields(product, barcode):
     return {
         "product_name": product.get("product_name"),
         "brands": product.get("brands"),
@@ -97,12 +90,54 @@ def fetch_product_by_barcode(barcode):
         "barcode": barcode
     }
 
+def _get_json(url, params=None):
+    # None means the external request failed. A dict means OpenFoodFacts responded.
+    headers = {"User-Agent": "FlatironInventoryLab/1.0 (student project)"}
+    try:
+        response = requests.get(url, headers=headers, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.RequestException:
+        return None
+
+def fetch_product_by_barcode(barcode):
+    url = f"https://world.openfoodfacts.org/api/v2/product/{barcode}.json"
+    data = _get_json(url)
+    if data is None:
+        return None, "OpenFoodFacts request failed"
+    if data.get("status") != 1:
+        return None, None
+    return _product_fields(data["product"], barcode), None
+
+def fetch_product_by_name(name):
+    url = "https://world.openfoodfacts.org/cgi/search.pl"
+    data = _get_json(url, params={
+        "search_terms": name,
+        "search_simple": 1,
+        "action": "process",
+        "json": 1,
+        "page_size": 1
+    })
+    if data is None:
+        return None, "OpenFoodFacts request failed"
+    products = data.get("products") or []
+    if not products:
+        return None, None
+    product = products[0]
+    return _product_fields(product, product.get("code")), None
+
 @app.route("/lookup", methods=["GET"])
 def lookup_product():
     barcode = request.args.get("barcode")
-    if not barcode:
-        return jsonify({"message": "Provide a barcode"}), 400
-    product = fetch_product_by_barcode(barcode)
+    name = request.args.get("name")
+    if barcode:
+        product, error = fetch_product_by_barcode(barcode)
+    elif name:
+        product, error = fetch_product_by_name(name)
+    else:
+        return jsonify({"message": "Provide a barcode or a name"}), 400
+    if error:
+        return jsonify({"message": error}), 502
     if product is None:
         return jsonify({"message": "Product not found"}), 404
     return jsonify(product)
@@ -110,10 +145,12 @@ def lookup_product():
 @app.route("/inventory/from-barcode", methods=["POST"])
 def add_from_barcode():
     data = request.get_json()
-    product = fetch_product_by_barcode(data.get("barcode"))
+    product, error = fetch_product_by_barcode(data.get("barcode"))
+    if error:
+        return jsonify({"message": error}), 502
     if product is None:
         return jsonify({"message": "Product not found"}), 404
-    new_id = max(item["id"] for item in inventory) + 1
+    new_id = max((item["id"] for item in inventory), default=0) + 1
     new_item = {
         "id": new_id,
         "product_name": product["product_name"],

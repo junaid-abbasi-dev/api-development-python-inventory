@@ -96,11 +96,16 @@ def delete_item():
 
 
 def find_on_api():
-    barcode = input("Barcode: ").strip()
-    if not barcode:
-        print("Enter a barcode.")
-        return
-    response = requests.get(f"{BASE_URL}/lookup", params={"barcode": barcode})
+    barcode = input("Barcode (leave blank to search by name): ").strip()
+    if barcode:
+        params = {"barcode": barcode}
+    else:
+        name = input("Product name: ").strip()
+        if not name:
+            print("Enter a barcode or a product name.")
+            return
+        params = {"name": name}
+    response = requests.get(f"{BASE_URL}/lookup", params=params)
     if response.status_code != 200:
         request_failed(response)
         return
